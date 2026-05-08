@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.01-py3-cpu
+    container_name: triton_risk_scorer
+    ports:
+      - "8000:8000"   # HTTP
+      - "8001:8001"   # gRPC
+      - "8002:8002"   # metrics
+    volumes:
+      - ./triton_model_repo:/models
+    command: tritonserver --model-repository=/models --log-verbose=1
+    shm_size: "2gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+  # Optional: Prometheus scrapes Triton metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - triton

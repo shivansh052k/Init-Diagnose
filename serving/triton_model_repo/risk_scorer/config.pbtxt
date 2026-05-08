@@ -1,0 +1,31 @@
+name: "risk_scorer"
+backend: "python"
+max_batch_size: 64
+
+input [
+  {
+    name: "features"
+    data_type: TYPE_FP32
+    dims: [ 16 ]
+  }
+]
+
+output [
+  {
+    name: "risk_score"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  }
+]
+
+instance_group [
+  {
+    kind: KIND_CPU
+    count: 2
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 8, 16, 32 ]
+  max_queue_delay_microseconds: 5000
+}

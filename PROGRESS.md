@@ -18,7 +18,7 @@ GraphRAG retrieval (context assembly)
     ↓
 XGBoost ensemble (risk scoring)          ← DONE
     ↓
-Triage output
+Triage output                            ← DONE (end-to-end pipeline complete)
 ```
 
 ---
@@ -67,10 +67,20 @@ Triage output
 - [x] 4.5 — Create `risk_scorer/scorer.py`
 - [x] 4.6 — Create `risk_scorer/evaluate.py`
 
-### 🔲 Component 5: Triton + SageMaker Serving (NEXT — START HERE)
-- Triton model repo config
-- SageMaker deploy script for XGBoost
-- Latency benchmarking
+### ✅ Component 5: Triton + SageMaker Serving (DONE — scripts written, not executed)
+- **Triton:** Python backend config + inference script (`serving/triton_model_repo/`)
+- **Docker:** `serving/triton_compose.yml` + Prometheus metrics scrape config
+- **Benchmark:** `serving/benchmark.py` — P50/P95/P99 latency via Triton HTTP API
+- **SageMaker:** `serving/sagemaker_deploy.py` — packages model, uploads to S3, deploys endpoint
+- **Note:** Triton not run locally (M3 ARM incompatibility + 8GB image). SageMaker not run (no AWS budget). Scripts ready for GPU machine / AWS deployment.
+
+**Task list:**
+- [x] 5.1 — `serving/export_model.py` — extract XGBoost + calibration params from pickle
+- [x] 5.2 — `serving/triton_model_repo/risk_scorer/config.pbtxt` — Triton Python backend config
+- [x] 5.3 — `serving/triton_model_repo/risk_scorer/1/model.py` — Triton inference script
+- [x] 5.4 — `serving/triton_compose.yml` + `serving/prometheus.yml` — local Docker stack
+- [x] 5.5 — `serving/benchmark.py` — latency benchmark (P50/P95/P99)
+- [x] 5.6 — `serving/sagemaker_deploy.py` — SageMaker XGBoost endpoint deploy
 
 ---
 
@@ -137,4 +147,4 @@ Init-Diagnose/
 1. `cd ~/Documents/Github/Init-Diagnose`
 2. `source .venv/bin/activate`
 3. `docker compose up -d` (start Neo4j)
-4. Start **Component 5** (Triton + SageMaker Serving)
+4. All components complete — see Known Issues for future improvements

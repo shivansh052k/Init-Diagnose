@@ -1,13 +1,12 @@
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from graphrag.retriever import GraphRAGRetriever
 
-
-# Clinical note → structured questions mapping
 TRIAGE_QUESTIONS = [
     "What is the primary diagnosis for this patient?",
     "What symptoms does this patient present with?",
@@ -18,6 +17,7 @@ TRIAGE_QUESTIONS = [
 
 
 class GraphRAGPipeline:
+
     def __init__(self):
         self.retriever = GraphRAGRetriever()
 
@@ -26,7 +26,6 @@ class GraphRAGPipeline:
 
     def extract_clinical_questions(self, clinical_note: str) -> list[str]:
         questions = []
-
         note_lower = clinical_note.lower()
 
         if any(w in note_lower for w in ["depress", "mood", "bipolar", "manic"]):
@@ -50,64 +49,72 @@ class GraphRAGPipeline:
         if any(w in note_lower for w in ["phq", "score", "assessment", "screen"]):
             questions.append("Find patients with PHQ-9 score above 15")
 
-        # Always include these baseline queries
         questions.append("What symptoms are associated with Major Depressive Disorder, severe?")
         questions.append("List all SSRI medications")
 
-        return list(dict.fromkeys(questions))  # dedupe preserve order
+        return list(dict.fromkeys(questions))
 
-    def run(self, clinical_note: str) -> dict:
+    def run(self, clinical_note: str, progress_callback: Callable | None = None) -> dict:
+        def emit(msg: str, step: str = "info", current: int = 0, total: int = 0):
+            if progress_callback:
+                progress_callback({
+                    "type": "progress",
+                    "step": step,
+                    "msg": msg,
+                    "current": current,
+                    "total": total,
+                })
+
         t0 = time.time()
 
+        emit("Extracting clinical questions from note...", "info")
         questions = self.extract_clinical_questions(clinical_note)
-        retrievals = []
+        emit(f"Generated {len(questions)} queries", "info")
 
+        retrievals = []
         for i, q in enumerate(questions, 1):
-            print(f"  [{i}/{len(questions)}] {q[:60]}")
+            emit(f"Query {i}/{len(questions)}: {q[:60]}", "query", i, len(questions))
+            t_q = time.time()
             result = self.retriever.retrieve(q)
+            elapsed = round((time.time() - t_q) * 1000)
+
+            if result["exec_success"]:
+                emit(f"  ✓ {result['record_count']} records ({elapsed}ms)", "success", i, len(questions))
+            else:
+                emit(f"  ✗ Query failed ({elapsed}ms)", "error", i, len(questions))
+
             retrievals.append(result)
 
-        # Assemble full context
-        context_blocks = []
-        for r in retrievals:
-            if r["exec_success"] and r["record_count"] > 0:
-                context_blocks.append(r["context"])
-
+        emit("Assembling graph context...", "info")
+        context_blocks = [
+            r["context"] for r in retrievals
+            if r["exec_success"] and r["record_count"] > 0
+        ]
         full_context = "\n\n".join(context_blocks)
 
         total_latency = (time.time() - t0) * 1000
+        emit(f"GraphRAG complete — {total_latency:.0f}ms", "done")
 
         return {
-            "clinical_note": clinical_note,
+            "clinical_note":       clinical_note,
             "questions_generated": questions,
-            "retrievals": retrievals,
-            "full_context": full_context,
-            "total_queries": len(questions),
-            "successful_queries": sum(1 for r in retrievals if r["exec_success"]),
-            "total_records": sum(r["record_count"] for r in retrievals),
-            "total_latency_ms": round(total_latency, 2),
+            "retrievals":          retrievals,
+            "full_context":        full_context,
+            "total_queries":       len(questions),
+            "successful_queries":  sum(1 for r in retrievals if r["exec_success"]),
+            "total_records":       sum(r["record_count"] for r in retrievals),
+            "total_latency_ms":    round(total_latency, 2),
         }
 
 
 if __name__ == "__main__":
     pipeline = GraphRAGPipeline()
-
     clinical_note = """
-    Patient presents with persistent depressed mood for 6 weeks, 
-    anhedonia, insomnia, and fatigue. PHQ-9 score of 18. 
+    Patient presents with persistent depressed mood for 6 weeks,
+    anhedonia, insomnia, and fatigue. PHQ-9 score of 18.
     History of Major Depressive Disorder. Currently on Sertraline 50mg.
     No suicidal ideation reported. GAF score 55.
     """
-
-    print("── GraphRAG Pipeline Test ──────────────────────────")
-    print(f"Clinical Note: {clinical_note.strip()[:100]}...")
-
-    result = pipeline.run(clinical_note)
-
-    print(f"\nQueries generated: {result['total_queries']}")
-    print(f"Successful:        {result['successful_queries']}")
-    print(f"Total records:     {result['total_records']}")
-    print(f"Total latency:     {result['total_latency_ms']}ms")
-    print(f"\nContext preview:\n{result['full_context'][:500]}")
-
+    result = pipeline.run(clinical_note, progress_callback=print)
+    print(f"Latency: {result['total_latency_ms']}ms")
     pipeline.close()
