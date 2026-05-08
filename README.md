@@ -12,6 +12,8 @@
 [![Neo4j](https://img.shields.io/badge/Neo4j-5.18-008CC1?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com)
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.1-FF6600?style=flat-square)](https://xgboost.ai)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Triton](https://img.shields.io/badge/Triton_Inference_Server-ready-76B900?style=flat-square&logo=nvidia&logoColor=white)](https://github.com/triton-inference-server/server)
+[![SageMaker](https://img.shields.io/badge/AWS_SageMaker-ready-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com/sagemaker/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 </div>
@@ -31,49 +33,133 @@
 
 Init-Diagnose is a research-grade end-to-end clinical triage pipeline for psychiatry. A clinician types a free-text patient note. The system:
 
-1. **Understands it** — a QLoRA fine-tuned Qwen2.5-3B translates natural language questions into schema-constrained Cypher queries
-2. **Reasons over a knowledge graph** — 110K-node Neo4j psychiatry graph (DSM-5 aligned) is traversed via GraphRAG
-3. **Scores the risk** — a calibrated XGBoost ensemble outputs a 0–100 risk score with triage level
-4. **Explains the decision** — top contributing factors + an interactive knowledge graph visualization
+1. **Understands it** — a QLoRA fine-tuned Qwen2.5-3B translates natural language into schema-constrained Cypher queries
+2. **Reasons over a knowledge graph** — 110K-node Neo4j psychiatry graph (DSM-5 aligned) traversed via GraphRAG
+3. **Scores the risk** — calibrated XGBoost ensemble outputs a 0–100 risk score with triage level
+4. **Explains the decision** — top contributing factors + interactive knowledge graph visualization
+5. **Serves at scale** — Triton Inference Server (Python backend, batch=64) + AWS SageMaker endpoint deployment
 
 No black boxes. Every triage decision is traceable back to structured clinical evidence.
 
 ---
 
-## Architecture
+## Full System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Clinical Note (NL)                        │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                    Auto Mode Detection
-                    (note quality 0-6)
-                    ┌────────┴────────┐
-                Fast (≥3 signals)  Full (<3 signals)
-                    │                │
-                    │         QLoRA Qwen2.5-3B
-                    │         NL → Cypher queries
-                    │                │
-                    │         Neo4j 110K-node Graph
-                    │         (DSM-5 ontology)
-                    │                │
-                    │         GraphRAG Context Assembly
-                    └────────┬────────┘
-                             │
-                    Feature Extraction (16 dims)
-                    + Negation-aware NLP
-                             │
-                    XGBoost + Platt Calibration
-                    (blended with linear score)
-                             │
-                ┌────────────┴────────────┐
-                │    Triage Output         │
-                │  Risk Score  0-100       │
-                │  Level  Low/Medium/High  │
-                │  Top Risk Factors        │
-                │  Recommendation          │
-                └─────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Clinical Note (Free Text)                          │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                        ┌──────────▼──────────┐
+                        │  Auto Mode Detection  │
+                        │  Note quality 0–6     │
+                        │  signal scoring       │
+                        └──────────┬────────────┘
+                          ┌────────┴────────┐
+                          │                 │
+               Fast (≥3 signals)     Full (<3 signals)
+               Text-only path        GraphRAG path
+               < 1s latency          ~170s on M3 CPU
+                          │                 │
+                          │    ┌────────────▼────────────────────┐
+                          │    │    NL2Graph Pipeline             │
+                          │    │                                  │
+                          │    │  Clinical Note                   │
+                          │    │      ↓                           │
+                          │    │  Keyword Extraction              │
+                          │    │      ↓                           │
+                          │    │  6 NL Clinical Questions         │
+                          │    │      ↓                           │
+                          │    │  QLoRA Qwen2.5-3B-Instruct       │
+                          │    │  (fine-tuned, PEFT adapters)     │
+                          │    │      ↓                           │
+                          │    │  Schema Validator + fix()        │
+                          │    │  (Cypher constraint enforcement)  │
+                          │    │      ↓                           │
+                          │    │  Neo4j 110K-node Graph           │
+                          │    │  (DSM-5 ontology)                │
+                          │    │  7 node types · 9 rel types      │
+                          │    │  1–30ms per Cypher query         │
+                          │    │      ↓                           │
+                          │    │  Context Assembler               │
+                          │    │  (Patient / Medication /         │
+                          │    │   Symptom / Aggregate views)     │
+                          │    └────────────┬────────────────────┘
+                          │                 │
+                          └────────┬────────┘
+                                   │
+                        ┌──────────▼──────────────────────────┐
+                        │       Feature Extraction (16-dim)    │
+                        │                                      │
+                        │  Demographics: age, gender           │
+                        │  Diagnosis: mood/anxiety/psychotic/  │
+                        │            bipolar/personality       │
+                        │  Risk signals: suicidal ideation     │
+                        │              severity, PHQ-9, GAF    │
+                        │  Treatment: med count, antipsychotic │
+                        │  Episodes: count, severe flag        │
+                        │                                      │
+                        │  Negation-aware NLP:                 │
+                        │  "no suicidal ideation" → score = 0  │
+                        └──────────┬──────────────────────────┘
+                                   │
+                        ┌──────────▼──────────────────────────┐
+                        │     XGBoost Risk Scorer              │
+                        │                                      │
+                        │  XGBoost + Platt sigmoid calibration │
+                        │  Blended: 10% XGBoost + 90% linear  │
+                        │  (linear provides score gradation)   │
+                        └──────────┬──────────────────────────┘
+                                   │
+                        ┌──────────▼──────────────────────────┐
+                        │         Triage Output                │
+                        │                                      │
+                        │  Risk Score    0–100                 │
+                        │  Level         Low / Medium / High   │
+                        │  Top Factors   ranked contributors   │
+                        │  Recommendation  clinical action     │
+                        │  Knowledge Graph  force-directed viz │
+                        └──────────┬──────────────────────────┘
+                                   │
+          ┌────────────────────────┴────────────────────────┐
+          │                                                  │
+┌─────────▼──────────────────────┐      ┌───────────────────▼──────────────┐
+│        Demo UI Layer            │      │     Production Serving Layer      │
+│                                 │      │                                  │
+│  FastAPI + SSE Streaming        │      │  ┌───────────────────────────┐   │
+│  (Server-Sent Events)           │      │  │  export_model.py          │   │
+│  Live query-by-query updates    │      │  │  Extract XGBoost +        │   │
+│                                 │      │  │  Platt calibration params │   │
+│  Subprocess Model Worker        │      │  └─────────────┬─────────────┘   │
+│  (MPS + asyncio deadlock fix)   │      │                │                  │
+│  Persistent NL2Cypher process   │      │  ┌─────────────▼─────────────┐   │
+│                                 │      │  │  Triton Inference Server   │   │
+│  React 18 + TypeScript          │      │  │  Python backend            │   │
+│  Glowing orb risk gauge         │      │  │  Batch size = 64           │   │
+│  Animated count-up              │      │  │  2 CPU instances           │   │
+│  Dark / light theme             │      │  │  config.pbtxt + model.py   │   │
+│  Stop / cancel button           │      │  └─────────────┬─────────────┘   │
+│  Force-directed KG viz          │      │                │                  │
+│  (react-force-graph-2d)         │      │  ┌─────────────▼─────────────┐   │
+│                                 │      │  │  Docker Compose Stack      │   │
+│  Auto mode detection            │      │  │  Triton + Prometheus       │   │
+│  Manual mode override           │      │  │  Metrics scrape config     │   │
+└─────────────────────────────────┘      │  └─────────────┬─────────────┘   │
+                                         │                │                  │
+                                         │  ┌─────────────▼─────────────┐   │
+                                         │  │  benchmark.py             │   │
+                                         │  │  P50 / P95 / P99          │   │
+                                         │  │  latency via Triton HTTP  │   │
+                                         │  └─────────────┬─────────────┘   │
+                                         │                │                  │
+                                         │  ┌─────────────▼─────────────┐   │
+                                         │  │  sagemaker_deploy.py      │   │
+                                         │  │  Package model artifacts  │   │
+                                         │  │  Upload to S3             │   │
+                                         │  │  Deploy SageMaker         │   │
+                                         │  │  XGBoost endpoint         │   │
+                                         │  └───────────────────────────┘   │
+                                         └──────────────────────────────────┘
 ```
 
 ---
@@ -124,7 +210,9 @@ No black boxes. Every triage decision is traceable back to structured clinical e
 | **Auto Mode** | Scores note quality (0–6 signals), auto-selects fast or full inference path |
 | **Streaming UI** | SSE-based live progress, query-by-query updates, cancellable mid-stream |
 | **Graph Viz** | Force-directed knowledge graph rendered from inference results |
-| **Serving Ready** | Triton model repo + SageMaker deploy script (GPU/cloud ready) |
+| **Triton Serving** | Python backend, batch=64, 2 CPU instances, Prometheus metrics |
+| **SageMaker Deploy** | S3 upload + XGBoost endpoint deployment script |
+| **Latency Benchmark** | P50/P95/P99 via Triton HTTP API |
 
 ---
 
@@ -132,7 +220,7 @@ No black boxes. Every triage decision is traceable back to structured clinical e
 
 ### Component 1 — Knowledge Graph Builder
 
-A 110K-node Neo4j psychiatric knowledge graph built from scratch with a DSM-5 aligned ontology.
+110K-node Neo4j psychiatric knowledge graph built from scratch with DSM-5 aligned ontology.
 
 ```
 Node types  (7):  Patient · Diagnosis · Symptom · Medication · Clinician · Assessment · Episode
@@ -145,6 +233,8 @@ Relationships (9): HAS_DIAGNOSIS · PRESENTS · PRESCRIBED · HAS_EPISODE · HAS
 - 30 psychiatric symptoms (Affective, Cognitive, Behavioral, Psychotic, Anxiety)
 - 20 medications across 8 drug classes (SSRI, SNRI, Antipsychotic, Mood Stabilizer…)
 - 50,000 assessments (PHQ-9, GAF, HAM-A, MADRS, PANSS, PCL-5, YMRS)
+
+---
 
 ### Component 2 — QLoRA NL2Graph Fine-tune
 
@@ -159,38 +249,48 @@ Qwen2.5-3B-Instruct fine-tuned with QLoRA on a synthetically generated NL→Cyph
 | Inference | transformers + PEFT on MPS / CPU |
 | Training data | 1,800 train / 200 val (20 templates × 5 NL variants) |
 
-The model generates schema-constrained Cypher with a validator that runs `fix()` on every output regardless of validity score.
+Every generated Cypher query passes through a schema validator that runs `fix()` regardless of validity score, enforcing node labels, relationship types, and property names from the DSM-5 ontology.
 
-### Component 3 — GraphRAG Retrieval
-
-```
-Clinical Note → Keyword extraction → 6 NL questions → Cypher generation → Neo4j → Context assembly
-```
-
-- Auto-generates clinically relevant questions from note content
-- Executes Cypher against Neo4j (1–30ms per query)
-- Assembles structured context by entity type (Patient / Medication / Symptom / Aggregate)
-- Returns full context for downstream risk scoring
-- M3 latency: ~170s (LLM bottleneck) → sub-150ms on GPU
-
-### Component 4 — XGBoost Risk Scorer
+**XGBoost Feature Importance and ROC Curve:**
 
 <table>
 <tr>
 <td width="50%">
 
-**Feature Importance**
 ![Feature Importance](docs/assets/feature-importance.png)
 
 </td>
 <td width="50%">
 
-**ROC Curve**
 ![ROC Curve](docs/assets/roc-curve.png)
 
 </td>
 </tr>
 </table>
+
+---
+
+### Component 3 — GraphRAG Retrieval
+
+```
+Clinical Note
+    → Keyword extraction
+    → 6 auto-generated NL clinical questions
+    → QLoRA Qwen2.5-3B (NL → Cypher)
+    → Schema validator + fix()
+    → Neo4j parallel query execution (1–30ms each)
+    → Context assembler (Patient / Medication / Symptom / Aggregate)
+    → Structured graph context for downstream scoring
+```
+
+- Auto-generates clinically relevant questions from note keywords
+- Executes up to 6 Cypher queries against the 110K-node graph
+- Assembles typed context (entities grouped by node label)
+- M3 latency: ~170s (LLM bottleneck) → sub-150ms on GPU via Triton
+
+---
+
+### Component 4 — XGBoost Risk Scorer
 
 **16 clinical features:**
 
@@ -207,41 +307,68 @@ Clinical Note → Keyword extraction → 6 NL questions → Cypher generation �
 - Linear score provides gradation for intermediate-risk cases
 - Platt sigmoid calibration for probability reliability
 - Negation-aware NLP: *"no suicidal ideation"* → feature = 0
+- Trained on 5,000 synthetic patients, 23.6% high-risk class balance
 
-### Component 5 — Triton + SageMaker Serving
+---
 
-Production serving scripts ready for GPU/cloud deployment:
+### Component 5 — Triton Inference Server + AWS SageMaker
+
+Production-ready serving infrastructure for GPU/cloud deployment.
+
+#### Triton Inference Server
 
 ```
-serving/
-├── export_model.py           # Extract XGBoost + calibration params
-├── model_worker.py           # Persistent NL2Cypher subprocess worker
-├── triton_model_repo/
-│   └── risk_scorer/
-│       ├── config.pbtxt      # Python backend, batch=64, 2 CPU instances
-│       └── 1/model.py        # Triton inference script
-├── triton_compose.yml        # Local Docker stack + Prometheus metrics
-├── benchmark.py              # P50/P95/P99 latency benchmark
-└── sagemaker_deploy.py       # S3 upload + endpoint deployment
+serving/triton_model_repo/
+└── risk_scorer/
+    ├── config.pbtxt      # Python backend · batch_size=64 · 2 CPU instances
+    └── 1/model.py        # Triton inference script (XGBoost + calibration)
 ```
+
+- Python backend processes batched feature vectors
+- Prometheus metrics endpoint for latency/throughput monitoring
+- Local Docker Compose stack: Triton + Prometheus scrape config
+- Latency benchmark: P50 / P95 / P99 via Triton HTTP API
+
+#### AWS SageMaker
+
+```python
+# sagemaker_deploy.py pipeline:
+# 1. export_model.py    — extract XGBoost params + Platt calibration coefficients
+# 2. Package artifacts  — tar.gz model bundle
+# 3. S3 upload          — boto3 to configured bucket
+# 4. Deploy endpoint    — SageMaker XGBoostModel → real-time endpoint
+```
+
+| Script | Purpose |
+|---|---|
+| `serving/export_model.py` | Extract XGBoost + calibration params from pickle |
+| `serving/model_worker.py` | Persistent NL2Cypher subprocess (MPS + asyncio fix) |
+| `serving/triton_model_repo/` | Triton Python backend config + inference script |
+| `serving/triton_compose.yml` | Local Docker stack + Prometheus metrics |
+| `serving/benchmark.py` | P50/P95/P99 latency benchmark via Triton HTTP |
+| `serving/sagemaker_deploy.py` | S3 upload + SageMaker endpoint deployment |
+
+> Note: Triton not run locally (M3 ARM image incompatibility). SageMaker not deployed (no AWS budget). All scripts are production-ready for GPU machine / AWS deployment.
+
+---
 
 ### Component 6 — Demo UI
 
-Full-stack clinical triage interface built with React + TypeScript + FastAPI.
+Full-stack clinical triage interface: React + TypeScript + Vite + Tailwind CSS + FastAPI.
 
 **Frontend:**
 - Split-panel layout — note input / results
-- Glowing orb gauge with animated count-up and color transitions
+- Glowing orb gauge with animated count-up and color transitions (green → amber → red)
 - Live SSE streaming progress box (query-by-query pipeline visibility)
-- Force-directed knowledge graph (react-force-graph-2d)
-- Auto mode detection with manual override
-- Stop button for cancelling long-running inference
+- Force-directed knowledge graph (react-force-graph-2d) built from inference results
+- Auto mode detection with manual override (auto / fast / full)
+- Stop button for cancelling long-running inference mid-stream
 - Dark / light theme toggle
 
 **Backend:**
 - FastAPI with Server-Sent Events (SSE) streaming
 - Auto mode detection (scores note on 6 clinical signal types)
-- Subprocess-based NL2Cypher worker (fixes MPS + asyncio deadlock on Apple Silicon)
+- Subprocess-based NL2Cypher worker — fixes MPS + asyncio deadlock on Apple Silicon
 - Knowledge graph builder from note + context text
 - Negation-aware feature extraction
 
@@ -258,8 +385,10 @@ Full-stack clinical triage interface built with React + TypeScript + FastAPI.
 | Backend | FastAPI · Uvicorn · SSE streaming |
 | Frontend | React 18 · TypeScript · Vite · Tailwind CSS |
 | Graph Viz | react-force-graph-2d |
-| Serving | Triton Inference Server · AWS SageMaker · Prometheus |
-| Infrastructure | Docker Compose · Python 3.13 |
+| Inference Serving | Triton Inference Server (Python backend) |
+| Cloud Deployment | AWS SageMaker · S3 · boto3 |
+| Observability | Prometheus · Docker Compose |
+| Infrastructure | Docker · Python 3.13 |
 
 ---
 
@@ -343,6 +472,43 @@ Feels anxious most days. No prior history documented.
 
 ---
 
+## Production Serving (Triton + SageMaker)
+
+### Export model artifacts
+
+```bash
+python serving/export_model.py
+```
+
+Extracts XGBoost booster + Platt calibration coefficients into `serving/model_artifacts/`.
+
+### Run Triton locally (GPU machine)
+
+```bash
+cd serving
+docker compose -f triton_compose.yml up
+```
+
+Starts Triton Inference Server + Prometheus. Endpoint: `http://localhost:8000/v2/models/risk_scorer/infer`
+
+### Benchmark latency
+
+```bash
+python serving/benchmark.py
+```
+
+Reports P50 / P95 / P99 via Triton HTTP API.
+
+### Deploy to AWS SageMaker
+
+```bash
+python serving/sagemaker_deploy.py
+```
+
+Packages model → uploads to S3 → deploys real-time XGBoost endpoint.
+
+---
+
 ## Project Structure
 
 ```
@@ -353,7 +519,7 @@ Init-Diagnose/
 │   └── loaders/               # Neo4j loader, verifier
 ├── nl2graph/                  # NL → Cypher pipeline
 │   ├── data/                  # Training data generation
-│   ├── train/                 # QLoRA training + adapters
+│   ├── train/                 # QLoRA training + PEFT adapters
 │   └── inference/             # NL2Cypher + schema validator
 ├── graphrag/                  # GraphRAG retrieval
 │   ├── pipeline.py            # End-to-end pipeline with SSE callbacks
@@ -368,23 +534,28 @@ Init-Diagnose/
 │   ├── scorer.py              # Inference: note + graph → risk score
 │   └── evaluate.py            # ROC, PR, calibration, importance plots
 ├── serving/                   # Production serving
+│   ├── export_model.py        # Extract XGBoost + calibration params
 │   ├── model_worker.py        # Persistent NL2Cypher subprocess
-│   ├── export_model.py        # Model artifact export
-│   ├── triton_model_repo/     # Triton config + inference script
-│   ├── benchmark.py           # Latency benchmarking
-│   └── sagemaker_deploy.py    # AWS SageMaker deployment
+│   ├── triton_model_repo/     # Triton Python backend config + script
+│   │   └── risk_scorer/
+│   │       ├── config.pbtxt   # batch=64, 2 CPU instances
+│   │       └── 1/model.py     # Triton inference script
+│   ├── triton_compose.yml     # Docker: Triton + Prometheus
+│   ├── prometheus.yml         # Metrics scrape config
+│   ├── benchmark.py           # P50/P95/P99 latency benchmark
+│   └── sagemaker_deploy.py    # AWS SageMaker endpoint deploy
 ├── app/                       # FastAPI backend
 │   └── app.py                 # API endpoints + SSE streaming
 ├── frontend/                  # React + TypeScript UI
 │   └── src/
 │       ├── components/        # RiskGauge, ResultPanel, ProgressBox, GraphView
 │       ├── App.tsx            # Main layout + state
-│       ├── api.ts             # API client
+│       ├── api.ts             # API client (SSE + REST)
 │       └── types.ts           # TypeScript interfaces
-├── eval/                      # NL2Graph evaluation
+├── eval/                      # NL2Graph evaluation (20-query gold set)
 ├── data/                      # Training data (gitignored)
 ├── docs/assets/               # Screenshots + plots
-├── docker-compose.yml
+├── docker-compose.yml         # Neo4j Docker stack
 └── requirements.txt
 ```
 
@@ -398,9 +569,11 @@ Init-Diagnose/
 | XGBoost AUROC | 1.0 (synthetic) | Binary labels derived from features |
 | GraphRAG queries | ~3/6 succeed | LLM accuracy bottleneck |
 | Fast mode latency | < 1s | Text-only, no LLM |
-| Full mode latency (M3) | ~170s | LLM bottleneck, sub-150ms on GPU |
+| Full mode latency (M3) | ~170s | LLM bottleneck |
+| Full mode latency (GPU + Triton) | < 150ms | Target on GPU deployment |
 | Knowledge graph | 110,573 nodes | 440,682 relationships |
 | Neo4j query time | 1–30ms | Per Cypher query |
+| Triton batch size | 64 | Python backend, 2 CPU instances |
 
 ---
 
@@ -410,8 +583,8 @@ Init-Diagnose/
 |---|---|
 | NL2Graph 85% FC (target 92%) | Retrain 336 steps + expand to 5K training samples |
 | GraphRAG 3/6 queries fail | Retry logic + correction prompts + fallback Cypher templates |
-| M3 full mode ~170s | GPU inference → sub-second |
-| Triton not tested locally | ARM-compatible image needed |
+| M3 full mode ~170s | GPU inference → sub-second via Triton |
+| Triton not tested locally | ARM-compatible image needed for M3 |
 | SageMaker not deployed | Requires AWS budget |
 | Synthetic training data | Real EHR data → real-world AUROC validation |
 
