@@ -82,6 +82,34 @@ Triage output                            ← DONE (end-to-end pipeline complete)
 - [x] 5.5 — `serving/benchmark.py` — latency benchmark (P50/P95/P99)
 - [x] 5.6 — `serving/sagemaker_deploy.py` — SageMaker XGBoost endpoint deploy
 
+### ✅ Component 6: Demo UI (DONE)
+- **Stack:** React + TypeScript + Vite + Tailwind CSS + FastAPI backend
+- **Features:**
+  - Split-panel layout — note input left, results right
+  - Auto mode detection (scores note quality 0-6, selects fast vs full)
+  - Manual mode override (auto / fast / full)
+  - SSE streaming progress box — live query-by-query pipeline updates
+  - Stop button — cancel in-flight full mode inference
+  - Glowing orb gauge — animated count-up, color shifts green→amber→red
+  - Knowledge graph visualization — force-directed graph (react-force-graph-2d)
+  - Dark / light theme toggle (light theme: warm cream Tennr-inspired)
+  - Negation-aware feature extraction ("no suicidal ideation" → score 0)
+  - Blended scoring (10% XGBoost + 90% linear) for score gradation
+- **Model worker:** `serving/model_worker.py` — NL2Cypher as persistent subprocess (fixes MPS+asyncio deadlock)
+- **Key files:** `app/app.py`, `frontend/src/`, `graphrag/worker_client.py`
+
+**Task list:**
+- [x] U1 — FastAPI backend with SSE streaming + auto mode detection
+- [x] U2 — React + TypeScript + Vite + Tailwind setup
+- [x] U3 — RiskGauge (glowing orb, animated count-up)
+- [x] U4 — ResultPanel (recommendation, factor bars, mode info, graph context)
+- [x] U5 — ProgressBox (live SSE event stream)
+- [x] U6 — GraphView (force-directed knowledge graph)
+- [x] U7 — Dark/light theme switcher
+- [x] U8 — Stop button for cancelling full mode
+- [x] U9 — Negation fix for suicidal ideation detection
+- [x] U10 — Model worker subprocess (MPS+asyncio fix)
+
 ---
 
 ## Repo Structure
