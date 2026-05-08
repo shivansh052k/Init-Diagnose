@@ -10,15 +10,26 @@ Ontology-Safe NL2Graph + GraphRAG Triage Framework
 ```
 Clinical Note (NL)
     ↓
-QLoRA-tuned Qwen2.5-3B → schema-constrained Cypher
+Auto Mode Detection (note quality 0–6)
     ↓
-Neo4j (110K-node psychiatry KG)
+[Fast path] Text-only features   |   [Full path] QLoRA Qwen2.5-3B → Cypher
+                                 |       ↓
+                                 |   Neo4j 110K-node psychiatry KG
+                                 |       ↓
+                                 |   GraphRAG context assembly
+    ↓ ←──────────────────────────┘
+Feature Extraction (16-dim, negation-aware NLP)
     ↓
-GraphRAG retrieval (context assembly)
+XGBoost + Platt calibration (blended 10/90 with linear score)
     ↓
-XGBoost ensemble (risk scoring)          ← DONE
+Triage output (score 0–100, level, factors, recommendation)
     ↓
-Triage output                            ← DONE (end-to-end pipeline complete)
+┌──────────────────┬──────────────────────────────┐
+│  Demo UI         │  Production Serving           │
+│  FastAPI + SSE   │  Triton (batch=64, Prometheus)│
+│  React + TS      │  AWS SageMaker endpoint       │
+│  Glowing orb KG  │  P50/P95/P99 benchmark        │
+└──────────────────┴──────────────────────────────┘
 ```
 
 ---
@@ -129,15 +140,41 @@ Init-Diagnose/
 │   ├── cypher_executor.py
 │   ├── context_assembler.py
 │   ├── retriever.py
-│   └── pipeline.py
-├── risk_scorer/               # NOT STARTED
-├── serving/                   # NOT STARTED
+│   ├── pipeline.py
+│   └── worker_client.py       # subprocess worker client (MPS+asyncio fix)
+├── risk_scorer/
+│   ├── feature_extractor.py   # 16-dim feature extraction (2 paths)
+│   ├── data_generator.py      # Neo4j → labeled training data
+│   ├── train.py               # XGBoost + calibration training
+│   ├── scorer.py              # inference: note + graph → risk score
+│   ├── evaluate.py            # ROC, PR, calibration, importance plots
+│   └── model/xgb_calibrated.pkl
+├── serving/
+│   ├── export_model.py        # extract XGBoost + calibration params
+│   ├── model_worker.py        # persistent NL2Cypher subprocess
+│   ├── triton_model_repo/
+│   │   └── risk_scorer/
+│   │       ├── config.pbtxt   # Python backend, batch=64, 2 CPU instances
+│   │       └── 1/model.py     # Triton inference script
+│   ├── triton_compose.yml     # Docker: Triton + Prometheus
+│   ├── prometheus.yml         # metrics scrape config
+│   ├── benchmark.py           # P50/P95/P99 latency benchmark
+│   └── sagemaker_deploy.py    # AWS SageMaker endpoint deploy
+├── app/
+│   └── app.py                 # FastAPI backend + SSE streaming
+├── frontend/
+│   └── src/
+│       ├── components/        # RiskGauge, ResultPanel, ProgressBox, GraphView
+│       ├── App.tsx
+│       ├── api.ts
+│       └── types.ts
 ├── eval/nl2graph_eval.py
 ├── data/
 │   ├── synthetic/             # gitignored
 │   ├── nl2graph_train.jsonl
 │   └── nl2graph_val.jsonl
 ├── models/                    # gitignored (too large)
+├── docs/assets/               # screenshots + plots
 ├── docker-compose.yml
 ├── requirements.txt
 └── .env                       # gitignored
@@ -166,7 +203,7 @@ Init-Diagnose/
 ## Known Issues / Future Work
 - NL2Graph FC at 85% (target 92%) — fix: retrain 336 steps + expand training data to 5K samples
 - GraphRAG 3/6 queries fail — fix: improve Cypher generation + add retry logic
-- Latency on M3 ~170s total — fix: GPU + Triton in Component 5
+- Latency on M3 ~170s total — fix: deploy Triton on GPU (scripts ready in serving/)
 - `generation_config.json` warnings (top_p/top_k) — cosmetic only, harmless
 
 ---
