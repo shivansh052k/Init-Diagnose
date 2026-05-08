@@ -1,5 +1,28 @@
-.env
+# Python
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment
+.env
+
+# Data
 data/synthetic/
+data/train.jsonl
+data/valid.jsonl
+
+# Models (too large for git)
+models/
+nl2graph/train/adapters/
+
+# Eval outputs
+eval/nl2graph_eval_results.json
+
+# Mac
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/

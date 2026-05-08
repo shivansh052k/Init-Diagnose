@@ -1,0 +1,19 @@
+model: "models/llama-3.2-3b-4bit"
+train: true
+data: "data"
+seed: 42
+batch_size: 4
+iters: 250
+val_batches: 25
+steps_per_report: 50
+steps_per_eval: 200
+save_every: 500
+adapter_path: "nl2graph/train/adapters"
+max_seq_length: 384
+lora_layers: 16
+
+lora_parameters:
+  rank: 8
+  alpha: 16
+  dropout: 0.05
+  scale: 10.0
