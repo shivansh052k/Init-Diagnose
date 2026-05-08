@@ -5,93 +5,91 @@ interface Props {
   level: 'Low' | 'Medium' | 'High'
 }
 
-const LEVEL_COLORS = {
-  Low:    { stroke: '#10b981', glow: 'rgba(16,185,129,0.3)',  text: 'text-emerald-400' },
-  Medium: { stroke: '#f59e0b', glow: 'rgba(245,158,11,0.3)',  text: 'text-amber-400'   },
-  High:   { stroke: '#ef4444', glow: 'rgba(239,68,68,0.3)',   text: 'text-red-400'     },
+const LEVEL = {
+  Low:    { color: '#10b981', glow: '0 0 40px rgba(16,185,129,0.5)',  ring: 'rgba(16,185,129,0.15)',  label: 'text-emerald-500' },
+  Medium: { color: '#f59e0b', glow: '0 0 40px rgba(245,158,11,0.5)', ring: 'rgba(245,158,11,0.15)', label: 'text-amber-500'   },
+  High:   { color: '#ef4444', glow: '0 0 60px rgba(239,68,68,0.6)',  ring: 'rgba(239,68,68,0.15)',  label: 'text-red-500'     },
 }
-
-const SIZE        = 220
-const STROKE      = 14
-const RADIUS      = (SIZE - STROKE) / 2
-const CENTER      = SIZE / 2
-const ARC_DEGREES = 240
-const ARC_RAD     = (ARC_DEGREES * Math.PI) / 180
-const CIRCUMFERENCE = RADIUS * ARC_RAD
-
-function polarToCart(cx: number, cy: number, r: number, deg: number) {
-  const rad = (deg * Math.PI) / 180
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
-}
-
-function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: number) {
-  const s = polarToCart(cx, cy, r, startDeg)
-  const e = polarToCart(cx, cy, r, endDeg)
-  const large = endDeg - startDeg > 180 ? 1 : 0
-  return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`
-}
-
-const START_DEG = 150
-const END_DEG   = 390
 
 export default function RiskGauge({ score, level }: Props) {
-  const [animated, setAnimated] = useState(0)
-  const colors = LEVEL_COLORS[level]
+  const [displayed, setDisplayed] = useState(0)
+  const [mounted, setMounted]     = useState(false)
+  const cfg = LEVEL[level]
 
+  // Count-up animation
   useEffect(() => {
-    setAnimated(0)
-    const raf = requestAnimationFrame(() => {
-      setTimeout(() => setAnimated(score), 50)
-    })
-    return () => cancelAnimationFrame(raf)
+    setDisplayed(0)
+    setMounted(false)
+    const t = setTimeout(() => {
+      setMounted(true)
+      const target = Math.round(score * 100)
+      const duration = 1000
+      const steps = 40
+      const increment = target / steps
+      let current = 0
+      let step = 0
+      const interval = setInterval(() => {
+        step++
+        current = Math.min(Math.round(increment * step), target)
+        setDisplayed(current)
+        if (step >= steps) clearInterval(interval)
+      }, duration / steps)
+      return () => clearInterval(interval)
+    }, 80)
+    return () => clearTimeout(t)
   }, [score, level])
 
-  const trackPath = arcPath(CENTER, CENTER, RADIUS, START_DEG, END_DEG)
-  const fillDeg   = START_DEG + ARC_DEGREES * animated
-  const fillPath  = arcPath(CENTER, CENTER, RADIUS, START_DEG, fillDeg)
+  const size = 200
+  const orb = mounted ? size : size * 0.85
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="relative" style={{ width: SIZE, height: SIZE }}>
-        <svg width={SIZE} height={SIZE}>
-          <defs>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="4" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
+    <div className="flex flex-col items-center gap-4">
+      <div
+        className="relative flex items-center justify-center"
+        style={{ width: size, height: size }}
+      >
+        {/* Outer pulse ring */}
+        <div
+          className="absolute rounded-full"
+          style={{
+            width: orb + 32,
+            height: orb + 32,
+            background: cfg.ring,
+            transition: 'all 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            animation: level === 'High' ? 'pulse 2s ease-in-out infinite' : undefined,
+          }}
+        />
 
-          {/* Track */}
-          <path
-            d={trackPath}
-            fill="none"
-            stroke="#1e2028"
-            strokeWidth={STROKE}
-            strokeLinecap="round"
-          />
+        {/* Mid ring */}
+        <div
+          className="absolute rounded-full"
+          style={{
+            width: orb + 12,
+            height: orb + 12,
+            background: cfg.ring,
+            opacity: 0.6,
+            transition: 'all 1s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          }}
+        />
 
-          {/* Fill */}
-          <path
-            d={fillPath}
-            fill="none"
-            stroke={colors.stroke}
-            strokeWidth={STROKE}
-            strokeLinecap="round"
-            filter="url(#glow)"
-            style={{ transition: 'all 1s cubic-bezier(0.34, 1.56, 0.64, 1)' }}
-          />
-        </svg>
-
-        {/* Center text */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
+        {/* Core orb */}
+        <div
+          className="absolute rounded-full flex flex-col items-center justify-center"
+          style={{
+            width: orb,
+            height: orb,
+            background: `radial-gradient(circle at 35% 35%, ${cfg.color}33, ${cfg.color}11)`,
+            border: `2px solid ${cfg.color}55`,
+            boxShadow: mounted ? cfg.glow : 'none',
+            transition: 'all 1s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          }}
+        >
+          {/* Score number */}
           <span
-            className={`text-5xl font-bold font-mono tracking-tight ${colors.text}`}
-            style={{ transition: 'color 0.6s ease' }}
+            className={`text-5xl font-bold font-mono tabular-nums ${cfg.label}`}
+            style={{ transition: 'color 0.6s ease', lineHeight: 1 }}
           >
-            {(animated * 100).toFixed(0)}
+            {displayed}
           </span>
           <span className="text-xs text-slate-500 uppercase tracking-widest mt-1">
             risk score
@@ -101,11 +99,11 @@ export default function RiskGauge({ score, level }: Props) {
 
       {/* Triage badge */}
       <div
-        className={`
-          px-5 py-1.5 rounded-full text-sm font-semibold uppercase tracking-widest border
-          ${level === 'High'   ? 'border-red-500/40 text-red-400 bg-red-500/10 animate-pulse' : ''}
-          ${level === 'Medium' ? 'border-amber-500/40 text-amber-400 bg-amber-500/10' : ''}
+        className={`px-6 py-1.5 rounded-full text-xs font-semibold uppercase tracking-widest border
+          ${level === 'High'   ? 'border-red-500/40 text-red-400 bg-red-500/10'         : ''}
+          ${level === 'Medium' ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'   : ''}
           ${level === 'Low'    ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : ''}
+          ${level === 'High'   ? 'animate-pulse' : ''}
         `}
       >
         {level} Risk

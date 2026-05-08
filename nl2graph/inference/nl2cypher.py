@@ -64,7 +64,10 @@ SYSTEM_PROMPT = (
 
 class NL2Cypher:
     def __init__(self):
-        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        if os.environ.get("FORCE_CPU") == "1":
+            self.device = "cpu"
+        else:
+            self.device = "mps" if torch.backends.mps.is_available() else "cpu"
         print(f"Loading model on {self.device}...")
         
         self.validator = SchemaValidator()

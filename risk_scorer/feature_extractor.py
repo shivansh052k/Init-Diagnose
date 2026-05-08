@@ -103,7 +103,13 @@ class FeatureExtractor:
         has_bipolar = 1.0 if any(w in combined for w in _BIPOLAR_KEYWORDS) else 0.0
         has_personality = 1.0 if any(w in combined for w in _PERSONALITY_KEYWORDS) else 0.0
 
-        suicidal = 1.0 if any(w in combined for w in _SUICIDAL_KEYWORDS) else 0.0
+        # check negation — "no suicidal", "denies suicidal", "without suicidal"
+        _NEGATIONS = ["no suicidal", "denies suicidal", "without suicidal",
+                     "no self-harm", "denies self-harm", "no active suicidal","no si", "si: none", "si: denied",
+                     ]
+        negated = any(n in combined for n in _NEGATIONS) or \
+            bool(re.search(r"(no|denies|without|denying|denied)\s+\w*\s*(suicid|self.harm)", combined))
+        suicidal = 0.0 if negated else (1.0 if any(w in combined for w in _SUICIDAL_KEYWORDS) else 0.0)
 
         phq9 = self._extract_number(note_lower, r"phq[-\s]?9[^\d]{0,10}(\d+)") or 0.0
         gaf = self._extract_number(note_lower, r"gaf[^\d]{0,10}(\d+)") or 50.0
@@ -111,7 +117,8 @@ class FeatureExtractor:
         med_count = sum(1 for d in _ANTIPSYCHOTIC_DRUGS if d in note_lower)
         has_antipsychotic = 1.0 if med_count > 0 or any(w in note_lower for w in ["antipsychotic", "quetiapine", "risperidone", "aripiprazole", "olanzapine"]) else 0.0
 
-        has_severe = 1.0 if any(w in combined for w in _SEVERE_KEYWORDS) else 0.0
+        _SEVERE_NEGATIONS = ["no severe", "not severe", "without severe"]
+        has_severe = 0.0 if any(n in combined for n in _SEVERE_NEGATIONS) else (1.0 if any(w in combined for w in _SEVERE_KEYWORDS) else 0.0)
 
         total_q = graphrag.get("total_queries") or 1
         successful_q = graphrag.get("successful_queries") or 0

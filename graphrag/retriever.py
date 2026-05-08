@@ -6,18 +6,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from graphrag.cypher_executor import CypherExecutor
 from graphrag.context_assembler import ContextAssembler
-from nl2graph.inference.nl2cypher import NL2Cypher
+from graphrag.worker_client import WorkerClient
 
 
 class GraphRAGRetriever:
     def __init__(self):
         print("Initializing GraphRAG Retriever...")
-        self.nl2cypher = NL2Cypher()
+        self.nl2cypher = WorkerClient()
         self.executor = CypherExecutor()
         self.assembler = ContextAssembler()
         print("Retriever ready.")
 
     def close(self):
+        self.nl2cypher.close()
         self.executor.close()
 
     def retrieve(self, question: str) -> dict:

@@ -24,7 +24,19 @@ class RiskScorer:
 
     def score(self, note: str, graphrag: dict) -> dict:
         features = self.extractor.from_clinical_context(note, graphrag)
-        prob = float(self.model.predict_proba(features.reshape(1, -1))[0, 1])
+        xgb_prob = float(self.model.predict_proba(features.reshape(1, -1))[0, 1])
+
+        # Linear feature score for gradation (XGBoost is near-binary)
+        linear = (features[9]  * 0.35 +   # suicidal ideation
+                features[10] * 0.25 +   # phq9
+                features[11] * 0.15 +   # gaf risk
+                features[6]  * 0.10 +   # psychotic
+                features[7]  * 0.10 +   # bipolar
+                features[14] * 0.10 +   # severe episode
+                features[4]  * 0.05 +   # mood disorder
+                features[5]  * 0.05)    # anxiety
+
+        prob = float(min(0.1 * xgb_prob + 0.9 * float(linear), 1.0))
         triage = self._triage_level(prob)
         top_factors = self._top_factors(features)
 

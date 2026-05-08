@@ -26,14 +26,21 @@ app = FastAPI(title="Init-Diagnose", version="1.0")
 scorer = RiskScorer()
 
 # Preload GraphRAG pipeline so MPS model loads on main thread
-print("Preloading GraphRAG pipeline...")
 _graphrag_pipeline = None
-try:
-    from graphrag.pipeline import GraphRAGPipeline
-    _graphrag_pipeline = GraphRAGPipeline()
-    print("GraphRAG pipeline ready.")
-except Exception as e:
-    print(f"GraphRAG preload failed: {e}")
+
+@app.on_event("startup")
+async def startup():
+    global _graphrag_pipeline
+    import torch
+    if torch.backends.mps.is_available():
+        _ = torch.zeros(1).to("mps")  # init MPS on main thread
+    print("Preloading GraphRAG pipeline...")
+    try:
+        from graphrag.pipeline import GraphRAGPipeline
+        _graphrag_pipeline = await asyncio.to_thread(GraphRAGPipeline)
+        print("GraphRAG pipeline ready.")
+    except Exception as e:
+        print(f"GraphRAG preload failed: {e}")
 
 # ── Note quality analyzer ──────────────────────────────────────────────────────
 

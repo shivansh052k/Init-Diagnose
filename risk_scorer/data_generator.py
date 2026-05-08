@@ -101,9 +101,9 @@ class RiskDataGenerator:
             if any(c in ["psychotic disorders", "bipolar disorders"] for c in categories):
                 return 1
 
-        # Criterion 3: PHQ-9 >= 20
+        # PHQ-9 >= 15 alone = high-risk
         for a in (record.get("phq9_assessments") or []):
-            if a and (a.get("score") or 0) >= 20:
+            if a and (a.get("score") or 0) >= 15:
                 return 1
 
         # Criterion 4: schizophrenia/schizoaffective + any severe episode
