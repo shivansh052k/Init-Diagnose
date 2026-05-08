@@ -16,7 +16,7 @@ Neo4j (110K-node psychiatry KG)
     ↓
 GraphRAG retrieval (context assembly)
     ↓
-XGBoost ensemble (risk scoring)          ← NEXT
+XGBoost ensemble (risk scoring)          ← DONE
     ↓
 Triage output
 ```
@@ -50,20 +50,24 @@ Triage output
 - **On GPU/Triton:** target sub-150ms retrieval is achievable
 - **Key files:** `graphrag/cypher_executor.py`, `graphrag/context_assembler.py`, `graphrag/retriever.py`, `graphrag/pipeline.py`
 
-### 🔲 Component 4: XGBoost Risk Scorer (NEXT — START HERE)
-**Last action:** About to add deps to requirements.txt
+### ✅ Component 4: XGBoost Risk Scorer (DONE)
+- **Model:** XGBoost + Platt calibration, trained on 5000 synthetic patients
+- **Data:** 23.6% high-risk class balance, saved at `data/risk_train.npz`
+- **AUROC:** 1.0 on synthetic data (expected — labels derived from features); real-world target ≥ 0.86
+- **Top features:** has_bipolar_disorder, suicidal_ideation_severity, has_severe_episode, has_psychotic_disorder, phq9_norm
+- **Model artifact:** `risk_scorer/model/xgb_calibrated.pkl`
+- **Plots:** `risk_scorer/plots/` (ROC, PR, calibration, feature importance)
+- **Key files:** `risk_scorer/feature_extractor.py`, `risk_scorer/data_generator.py`, `risk_scorer/train.py`, `risk_scorer/scorer.py`, `risk_scorer/evaluate.py`
 
 **Task list:**
-- [ ] 4.1 — Add to requirements.txt: `xgboost==2.1.1`, `scikit-learn==1.5.2`, `matplotlib==3.9.2`, `joblib==1.4.2`
-- [ ] 4.2 — Create `risk_scorer/feature_extractor.py`
-- [ ] 4.3 — Create `risk_scorer/data_generator.py`
-- [ ] 4.4 — Create `risk_scorer/train.py`
-- [ ] 4.5 — Create `risk_scorer/scorer.py`
-- [ ] 4.6 — Create `risk_scorer/evaluate.py`
+- [x] 4.1 — Add to requirements.txt: `xgboost==2.1.1`, `scikit-learn==1.5.2`, `matplotlib==3.9.2`, `joblib==1.4.2`
+- [x] 4.2 — Create `risk_scorer/feature_extractor.py`
+- [x] 4.3 — Create `risk_scorer/data_generator.py`
+- [x] 4.4 — Create `risk_scorer/train.py`
+- [x] 4.5 — Create `risk_scorer/scorer.py`
+- [x] 4.6 — Create `risk_scorer/evaluate.py`
 
-**Goal:** AUROC 0.86 (baseline 0.67), calibrated ensemble
-
-### 🔲 Component 5: Triton + SageMaker Serving
+### 🔲 Component 5: Triton + SageMaker Serving (NEXT — START HERE)
 - Triton model repo config
 - SageMaker deploy script for XGBoost
 - Latency benchmarking
@@ -133,4 +137,4 @@ Init-Diagnose/
 1. `cd ~/Documents/Github/Init-Diagnose`
 2. `source .venv/bin/activate`
 3. `docker compose up -d` (start Neo4j)
-4. Start **Component 4, Task 4.1**
+4. Start **Component 5** (Triton + SageMaker Serving)
