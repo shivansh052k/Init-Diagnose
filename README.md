@@ -23,7 +23,7 @@
 <div align="center">
 
 ![UI Light Theme](docs/assets/ui-light.png)
-*Light theme — high-risk patient, glowing orb gauge, live knowledge graph*
+*Light theme — low-risk patient, glowing orb gauge, live knowledge graph*
 
 </div>
 
@@ -610,7 +610,7 @@ MIT License — see [LICENSE](LICENSE).
 
 <div align="center">
 
-Built by [Shivansh Gupta](https://github.com/shivansh052k) · Research demo · Not for clinical use
+Built by [Shivansh Gupta](https://github.com/shivansh052k), [Sada Kakarla](https://github.com/Sadakakarla) · Research demo · Not for clinical use
 
 *Star ⭐ if you found this useful*
 
